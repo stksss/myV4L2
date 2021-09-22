@@ -116,6 +116,17 @@ static int myvivi_vidioc_dqbuf(struct file *file, void *priv,
 				file->f_flags & O_NONBLOCK);
 }
 
+static int myvivi_vidioc_streamon(struct file *file, void *priv,
+			enum v4l2_buf_type i){
+	return videobuf_streamon(&myvivi->vb_vidqueue);
+}
+
+static int myvivi_vidioc_streamoff(struct file *file, void *priv,
+			enum v4l2_buf_type i){
+	videobuf_streamoff(&myvivi->vb_vidqueue);
+	return 0;
+}
+
 static const struct v4l2_ioctl_ops myvivi_ioctl_ops = {
 	//表示它是一个摄像头设备
 	.vidioc_querycap = myvivi_vidoc_querycap,
@@ -132,9 +143,9 @@ static const struct v4l2_ioctl_ops myvivi_ioctl_ops = {
 	.vidioc_qbuf 				= myvivi_vidioc_qbuf,
 	.vidioc_dqbuf 				= myvivi_vidioc_dqbuf,
 
-//	//启动/停止
-//	.vidioc_streamon 			= myvivi_vidioc_streamon,
-//	.vidioc_streamoff 			= myvivi_vidioc_streamoff,
+	//启动/停止
+	.vidioc_streamon 			= myvivi_vidioc_streamon,
+	.vidioc_streamoff 			= myvivi_vidioc_streamoff,
 };
 
 /*
