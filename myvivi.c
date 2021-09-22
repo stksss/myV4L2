@@ -12,6 +12,9 @@ struct vivi {
 	struct video_device *vdev;
 	struct device dev;
 	struct v4l2_format format;
+	
+	struct videobuf_queue vb_vidqueue;
+	spinlock_t queue_slock;
 };
 
 
@@ -113,10 +116,84 @@ static const struct v4l2_ioctl_ops myvivi_ioctl_ops = {
 //	.vidioc_streamoff 			= myvivi_vidioc_streamoff,
 };
 
+/*
+ * APP调用ioctl VIDIOC_REQUFS时会调用此函数
+ * 重新调整count和size
+*/
+static int myvivi_buffer_setup(struct videobuf_queue *vq, 
+			unsigned int *count, unsigned int *size) {
+	*size = myvivi->format.fmt.pix.sizeimage;
+	
+	if(0 == *count) *count = 32;	//这里最小height设置的是32
+	
+	return 0;
+} 
+
+/* 
+ * APP调用ioctl VIDIOC_QBUF时被调用
+ */
+static int myvivi_buffer_prepare(struct videobuf_queue *vq, struct videobuf_buffer *vb,
+						enum v4l2_field field) {
+	//做些准备工作
+	
+	//设置状态
+	vb->state = VIDEOBUF_PREPARED;
+	
+	return 0;
+}
+
+/*
+ * APP调用ioctl VIDIOC_QBUF时: 
+ * 1. 先调用buf_prepare进行一些准备工作
+ * 2. 把buf放入队列
+ * 3. 调用buf_queue(起通知作用)
+ */
+static void myvivi_buffer_queue(struct videobuf_queue *vq, struct videobuf_buffer *vb) {
+	vb->state = VIDEOBUF_QUEUED;
+}
+
+//APP不使用队列时，释放内存
+static void myvivi_buffer_release(struct videobuf_queue *vq, struct videobuf_buffer *vb) {
+	videobuf_vmalloc_free(vb);
+	vb->state = VIDEOBUF_NEEDS_INIT;
+}
+
+
+static struct videobuf_queue_ops myvivi_video_qops = {
+	.buf_setup		= myvivi_buffer_setup,		//计算大小以免浪费
+	.buf_prepare 	= myvivi_buffer_prepare,	//
+	.buf_queue		= myvivi_buffer_queue,		//
+	.buf_release	= myvivi_buffer_release,		//
+};
+
+
+static int myvivi_open(struct file *file) {
+	/* 初始化队列 */
+	/* ?? */
+	videobuf_queue_vmalloc_init(&myvivi->vb_vidqueue, &myvivi_video_qops,
+				NULL,&myvivi->queue_slock, V4L2_BUF_TYPE_VIDEO_CAPTURE,
+				V4L2_FIELD_INTERLACED, sizeof(struct videobuf_buffer), NULL,NULL);
+	return 0;
+}
+
+static int myvivi_close(struct file *file) {
+	videobuf_stop(&myvivi->vb_vidqueue);
+	videobuf_mmap_free(&myvivi->vb_vidqueue);
+	
+	return 0;
+}
+
+static int myvivi_mmap(struct file *file, struct vm_area_struct *vma) {
+	return videobuf_mmap_mapper(&myvivi->vb_vidqueue, vma);//??
+}
+
+
 static const struct v4l2_file_operations myvivi_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = video_ioctl2,
-	
+	.open			= myvivi_open,
+	.release		= myvivi_close,
+	.mmap			= myvivi_mmap,
 };
 
 
@@ -151,6 +228,9 @@ static int myvivi_probe(struct platform_device *pdev) {
 	myvivi->vdev->ioctl_ops = &myvivi_ioctl_ops;
 	myvivi->vdev->v4l2_dev = &myvivi->v4l2_dev;
 	myvivi->vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
+	
+	//初始化一个spinlock, 初始化队列列时会用到
+	spin_lock_init(&myvivi->queue_slock);
 
 	/* 3.注册 */
 	ret = video_register_device(myvivi->vdev,VFL_TYPE_GRABBER,-1);
