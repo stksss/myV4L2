@@ -5,7 +5,7 @@
 #include <linux/videodev2.h>
 #include <media/videobuf-vmalloc.h>
 #include <linux/platform_device.h>
-
+#include <linux/timer.h>
 
 struct vivi {
 	struct v4l2_device v4l2_dev;
@@ -19,6 +19,54 @@ struct vivi {
 
 
 static struct vivi *myvivi;
+
+static struct timer_list myvivi_timer;
+static struct list_head myvivi_vb_local_queue;
+
+
+static void myvivi_timer_function(unsigned long data)
+{
+    struct videobuf_buffer *vb;
+	void *vbuf;
+	struct timeval ts;
+	
+	    if (list_empty(&myvivi_vb_local_queue)) {
+        goto out;
+    }
+    
+    /* 1. 构造数据: 从队列头部取出第1个videobuf, 填充数据
+     * 1.1 从本地队列取出第1个videobuf 
+	 */ 
+    vb = list_entry(myvivi_vb_local_queue.next,
+             struct videobuf_buffer, queue);
+    
+    /* Nobody is waiting on this buffer, return */
+    if (!waitqueue_active(&vb->done))
+        goto out;
+    
+
+    /* 1.2 填充数据 */
+    vbuf = videobuf_to_vmalloc(vb);
+    memset(vbuf, 0, vb->size);
+    vb->field_count++;
+    do_gettimeofday(&ts);
+    vb->ts = ts;
+    vb->state = VIDEOBUF_DONE;
+
+    /* 1.3 把videobuf从本地队列中删除 */
+    list_del(&vb->queue);
+
+    /* 2. 唤醒进程: 唤醒videobuf->done上的进程 */
+    wake_up(&vb->done);
+    
+out:
+    /* 3. 修改timer的超时时间 : 30fps, 1秒里有30帧数据
+     *    每1/30 秒产生一帧数据
+     */
+    mod_timer(&myvivi_timer, jiffies + HZ/30);
+}
+
+
 
 //表示它是一个摄像头设备
 static int myvivi_vidoc_querycap(struct file *file,void *priv,
@@ -182,6 +230,11 @@ static int myvivi_buffer_prepare(struct videobuf_queue *vq, struct videobuf_buff
  */
 static void myvivi_buffer_queue(struct videobuf_queue *vq, struct videobuf_buffer *vb) {
 	vb->state = VIDEOBUF_QUEUED;
+	
+	/* 把videobuf放入本地一个队列尾部
+     * 定时器处理函数就可以从本地队列取出videobuf
+     */
+    list_add_tail(&vb->queue, &myvivi_vb_local_queue);
 }
 
 //APP不使用队列时，释放内存
@@ -205,10 +258,16 @@ static int myvivi_open(struct file *file) {
 	videobuf_queue_vmalloc_init(&myvivi->vb_vidqueue, &myvivi_video_qops,
 				NULL,&myvivi->queue_slock, V4L2_BUF_TYPE_VIDEO_CAPTURE,
 				V4L2_FIELD_INTERLACED, sizeof(struct videobuf_buffer), NULL,NULL);
+	
+	//启动定时器，产生数据
+	myvivi_timer.expires = jiffies + 1;
+    add_timer(&myvivi_timer);
+	
 	return 0;
 }
 
 static int myvivi_close(struct file *file) {
+	del_timer(&myvivi_timer);
 	videobuf_stop(&myvivi->vb_vidqueue);
 	videobuf_mmap_free(&myvivi->vb_vidqueue);
 	
@@ -270,6 +329,13 @@ static int myvivi_probe(struct platform_device *pdev) {
 		printk(KERN_ERR"register video error!!!\n");
 		goto video_reg_err;
 	}
+	
+	
+	//用定时器产生虚拟数据
+	init_timer(&myvivi_timer);
+	myvivi_timer.function = myvivi_timer_function;
+	
+	INIT_LIST_HEAD(&myvivi_vb_local_queue);
 
 	return ret;
 
