@@ -95,6 +95,27 @@ static int myvivi_vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	return ret;
 }
 
+static int myvivi_vidioc_reqbufs(struct file *file, void *priv, 
+			struct v4l2_requestbuffers *p) {
+	return videobuf_reqbufs(&myvivi->vb_vidqueue,p);
+}
+
+static int myvivi_vidioc_querybuf(struct file *file, void *priv,
+			struct v4l2_buffer *p) {
+	return videobuf_querybuf(&myvivi->vb_vidqueue,p);
+}
+
+static int myvivi_vidioc_qbuf(struct file *file, void *priv,
+			struct v4l2_buffer *p){
+	return videobuf_qbuf(&myvivi->vb_vidqueue,p);
+}
+
+static int myvivi_vidioc_dqbuf(struct file *file, void *priv, 
+			struct v4l2_buffer *p) {
+	return videobuf_dqbuf(&myvivi->vb_vidqueue, p, 
+				file->f_flags & O_NONBLOCK);
+}
+
 static const struct v4l2_ioctl_ops myvivi_ioctl_ops = {
 	//表示它是一个摄像头设备
 	.vidioc_querycap = myvivi_vidoc_querycap,
@@ -105,12 +126,12 @@ static const struct v4l2_ioctl_ops myvivi_ioctl_ops = {
 	.vidioc_try_fmt_vid_cap 	= myvivi_vidioc_try_fmt_vid_cap,
 	.vidioc_s_fmt_vid_cap 		= myvivi_vidioc_s_fmt_vid_cap,
 
-//	//缓冲区操作: 申请/查询/放入/取出队列
-//	.vidioc_reqbufs 			= myvivi_vidioc_reqbufs,
-//	.vidioc_querybuf 			= myvivi_vidioc_querybuf,
-//	.vidioc_qbuf 				= myvivi_vidioc_qbuf,
-//	.vidioc_dqbuf 				= myvivi_vidioc_dqbuf,
-//
+	//缓冲区操作: 申请/查询/放入/取出队列
+	.vidioc_reqbufs 			= myvivi_vidioc_reqbufs,
+	.vidioc_querybuf 			= myvivi_vidioc_querybuf,
+	.vidioc_qbuf 				= myvivi_vidioc_qbuf,
+	.vidioc_dqbuf 				= myvivi_vidioc_dqbuf,
+
 //	//启动/停止
 //	.vidioc_streamon 			= myvivi_vidioc_streamon,
 //	.vidioc_streamoff 			= myvivi_vidioc_streamoff,
