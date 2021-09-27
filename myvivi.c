@@ -8,6 +8,8 @@
 #include <linux/platform_device.h>
 #include <linux/timer.h>
 
+#include "image.h"
+
 
 /* The minimum image width/height */
 #define MIN_WIDTH  48
@@ -52,16 +54,59 @@ static struct vivi *myvivi;
 
 
 struct myvivi_fmt myvivi_formats = {
-	.fourcc   = V4L2_PIX_FMT_YUYV,
+	//.fourcc   = V4L2_PIX_FMT_YUYV,
+	//.bit_depth = 16,
+	//.buffers = 1,
+	//.colorspace = V4L2_COLORSPACE_SRGB,
+	
+	.fourcc   = V4L2_PIX_FMT_RGB565, /* gggbbbbb rrrrrggg */
 	.bit_depth = 16,
 	.buffers = 1,
 	.colorspace = V4L2_COLORSPACE_SRGB,
 };
 
+
+static void fillbuff(char *vbuf, int bw, int bh){
+	static u8 count = 0;
+	static u8 c = 0;
+	int w,h;
+	int w_ofset = 0,h_ofset = 0;
+	int i,j;
+	
+	if(bw > (IMAGE_WIDTH*2)) {
+		w = IMAGE_WIDTH * 2;
+		w_ofset = (bw - w) / 2;
+	} else {
+		w = bw;
+	}
+	
+	if(bh > IMAGE_HEIGHT) {
+		h = IMAGE_HEIGHT;
+		h_ofset = (bh - h) / 2;
+	} else {
+		h = bh;
+	}
+	
+	for(i=0;i<h;i++){
+		for(j=0;j<w;j++){
+			vbuf[bw*(i+h_ofset) + j+w_ofset] = image[count][w*i + j];
+		}
+	}
+	
+	
+	//太快了, 慢点
+	c++;
+	c = c % 10;
+	if(c == 0) {
+		count++;
+		count = count % IMAGE_NUM;
+	}
+}
+
 static void myvivi_timer_function(struct timer_list *t){
 	struct vivi *vind = container_of(t, struct vivi, timer);
     struct myvivi_buffer *vid_cap_buf = NULL;
-	void *vbuf;
+	char *vbuf;
 	
 	printk("------%s----\n",__func__);
 	printk("width = %d,height = %d\n",vind->fmt_cap_rect.width,vind->fmt_cap_rect.height);
@@ -83,7 +128,8 @@ static void myvivi_timer_function(struct timer_list *t){
 	printk("bytesperline=%d\n",vind->bytesperline);
 	
 	//填充数据
-	memset(vbuf,0xdd,vind->bytesperline * vind->fmt_cap_rect.height);
+	memset(vbuf,0xff,vind->bytesperline * vind->fmt_cap_rect.height);
+	fillbuff(vbuf,vind->bytesperline,vind->fmt_cap_rect.height);
 	
     // 它干两个工作，把buffer 挂入done_list 另一个唤醒应用层序，让它dqbuf
     vb2_buffer_done(&vid_cap_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
